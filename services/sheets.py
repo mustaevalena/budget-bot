@@ -12,8 +12,13 @@ _SUMMARY_SHEET = "суммы по месяцам"
 
 
 def _get_service():
-    creds_json = os.environ["GOOGLE_CREDENTIALS_JSON"]
-    info = json.loads(creds_json)
+    raw = os.environ["GOOGLE_CREDENTIALS_JSON"]
+    # support both raw JSON and base64-encoded JSON
+    try:
+        info = json.loads(raw)
+    except json.JSONDecodeError:
+        import base64
+        info = json.loads(base64.b64decode(raw).decode())
     creds = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
     return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
