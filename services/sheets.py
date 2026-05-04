@@ -18,6 +18,7 @@ def _get_service():
         info = json.loads(raw)
     except json.JSONDecodeError:
         import base64
+        raw += "=" * (-len(raw) % 4)
         info = json.loads(base64.b64decode(raw).decode())
     creds = service_account.Credentials.from_service_account_info(info, scopes=_SCOPES)
     return build("sheets", "v4", credentials=creds, cache_discovery=False)
