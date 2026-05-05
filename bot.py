@@ -14,7 +14,7 @@ from config import TELEGRAM_TOKEN, CONFIRMING, CHOOSING_CATEGORY
 from handlers.photo import handle_photo
 from handlers.text import handle_text
 from keyboards import category_keyboard, confirm_keyboard, format_card
-from services.sheets import append_transaction, get_month_total
+from services.sheets import append_transaction, get_month_total, repair_summary_formulas
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -30,6 +30,16 @@ async def cmd_start(update: Update, context) -> None:
         "<i>Кофе 500</i> или <i>Wolt 1200 RSD еда</i>",
         parse_mode="HTML",
     )
+
+
+async def cmd_repair(update: Update, context) -> None:
+    msg = await update.message.reply_text("🔧 Восстанавливаю формулы в листе 'суммы по месяцам'...")
+    try:
+        repair_summary_formulas()
+        await msg.edit_text("✅ Формулы восстановлены.")
+    except Exception as e:
+        logger.error("Repair error: %s", e)
+        await msg.edit_text(f"❌ Ошибка: {e}")
 
 
 async def cmd_cancel(update: Update, context) -> int:
@@ -174,6 +184,7 @@ def main() -> None:
     )
 
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("repair", cmd_repair))
     app.add_handler(conv)
 
     logger.info("Bot started")

@@ -95,12 +95,13 @@ def _ensure_month_column(service, month_num: int) -> None:
     # Write header
     values = [[header]]
     # SUMPRODUCT formula for each category row (rows 2 to total_rows-1)
+    # Use INDIRECT() so references don't drift when rows are inserted in the transactions sheet
     for row in range(2, total_rows):  # skip header and ИТОГО
         formula = (
             f"=SUMPRODUCT("
-            f"(RIGHT('{_TRANSACTIONS_SHEET}'!$A$2:$A$10000,2)=\"{mm}\")*"
-            f"('{_TRANSACTIONS_SHEET}'!$D$2:$D$10000=$A{row})*"
-            f"'{_TRANSACTIONS_SHEET}'!$C$2:$C$10000)"
+            f"(RIGHT(INDIRECT(\"'{_TRANSACTIONS_SHEET}'!A2:A10000\"),2)=\"{mm}\")*"
+            f"(INDIRECT(\"'{_TRANSACTIONS_SHEET}'!D2:D10000\")=$A{row})*"
+            f"INDIRECT(\"'{_TRANSACTIONS_SHEET}'!C2:C10000\"))"
         )
         values.append([formula])
     # ИТОГО row — SUM of the column
@@ -126,6 +127,58 @@ def _ensure_month_column(service, month_num: int) -> None:
         valueInputOption="USER_ENTERED",
         body={"values": total_values},
     ).execute()
+
+
+def repair_summary_formulas() -> None:
+    """Fix drifted SUMPRODUCT formulas in the summary sheet caused by row insertions.
+    Rewrites all month column formulas to use INDIRECT() so they stay static."""
+    service = _get_service()
+
+    # Read headers to find all month columns
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_SUMMARY_SHEET}'!1:1",
+    ).execute()
+    headers = result.get("values", [[]])[0]
+
+    # Read column A to find category rows and ИТОГО
+    col_a = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_SUMMARY_SHEET}'!A:A",
+    ).execute().get("values", [])
+    total_rows = len(col_a)
+
+    for col_idx, header in enumerate(headers, start=1):
+        # Match month headers like "май 2026, RSD"
+        import re as _re
+        m = _re.match(r"(\S+) 2026, RSD", header)
+        if not m:
+            continue
+        month_name = m.group(1)
+        month_num = next((k for k, v in MONTH_NAMES.items() if v == month_name), None)
+        if month_num is None:
+            continue
+        mm = str(month_num).zfill(2)
+        col = _col_letter(col_idx)
+
+        values = []
+        for row in range(2, total_rows):  # skip header, skip ИТОГО
+            formula = (
+                f"=SUMPRODUCT("
+                f"(RIGHT(INDIRECT(\"'{_TRANSACTIONS_SHEET}'!A2:A10000\"),2)=\"{mm}\")*"
+                f"(INDIRECT(\"'{_TRANSACTIONS_SHEET}'!D2:D10000\")=$A{row})*"
+                f"INDIRECT(\"'{_TRANSACTIONS_SHEET}'!C2:C10000\"))"
+            )
+            values.append([formula])
+        # ИТОГО row
+        values.append([f"=SUM({col}2:{col}{total_rows - 1})"])
+
+        service.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"'{_SUMMARY_SHEET}'!{col}2",
+            valueInputOption="USER_ENTERED",
+            body={"values": values},
+        ).execute()
 
 
 def get_month_total(month_num: int) -> int | None:
