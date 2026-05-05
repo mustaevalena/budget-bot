@@ -128,6 +128,23 @@ def _ensure_month_column(service, month_num: int) -> None:
     ).execute()
 
 
+def get_merchant_categories() -> dict[str, str]:
+    """Return {merchant: last_used_category} from transaction history."""
+    service = _get_service()
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_TRANSACTIONS_SHEET}'!B:D",
+    ).execute()
+    rows = result.get("values", [])
+    mapping = {}
+    for row in rows[1:]:  # skip header
+        if len(row) >= 3:
+            merchant, _, category = row[0], row[1], row[2]
+            if merchant and category:
+                mapping[merchant.strip().lower()] = category
+    return mapping
+
+
 def append_transaction(date: str, merchant: str, amount: int, category: str, comment: str = "") -> None:
     service = _get_service()
 
