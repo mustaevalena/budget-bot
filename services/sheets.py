@@ -207,9 +207,10 @@ def get_month_total(month_num: int) -> int | None:
     val = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
         range=f"'{_SUMMARY_SHEET}'!{col}{itogo_row}",
+        valueRenderOption="UNFORMATTED_VALUE",
     ).execute().get("values", [[None]])[0][0]
     try:
-        return int(float(str(val).replace(",", ".")))
+        return int(float(val))
     except (ValueError, TypeError):
         return None
 
