@@ -41,8 +41,13 @@ def _today_ddmm() -> str:
 
 def _parse_response(text: str) -> list[dict]:
     text = text.strip()
+    # strip markdown code fences
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
+    # extract JSON array or object even if surrounded by text
+    match = re.search(r"(\[.*\]|\{.*\})", text, re.DOTALL)
+    if match:
+        text = match.group(1)
     data = json.loads(text)
     if isinstance(data, dict):
         data = [data]
@@ -63,7 +68,7 @@ def parse_screenshot(image_bytes: bytes, mime_type: str = "image/jpeg") -> list[
     today = _today_ddmm()
     response = _client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=300,
+        max_tokens=2000,
         system=_SYSTEM,
         messages=[
             {
@@ -88,7 +93,7 @@ def parse_text(text: str) -> list[dict]:
     today = _today_ddmm()
     response = _client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=300,
+        max_tokens=2000,
         system=_SYSTEM,
         messages=[
             {

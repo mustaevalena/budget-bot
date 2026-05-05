@@ -14,7 +14,7 @@ from config import TELEGRAM_TOKEN, CONFIRMING, CHOOSING_CATEGORY
 from handlers.photo import handle_photo
 from handlers.text import handle_text
 from keyboards import category_keyboard, confirm_keyboard, format_card
-from services.sheets import append_transaction
+from services.sheets import append_transaction, get_month_total
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -48,7 +48,20 @@ async def _show_next(query, context, idx: int) -> int:
     """Show next transaction or finish."""
     txs = context.user_data.get("txs", [])
     if idx >= len(txs):
-        await query.edit_message_text("✅ Все транзакции обработаны.")
+        # Check summary totals for the current month
+        saved = context.user_data.get("saved_dates", [])
+        summary = ""
+        if saved:
+            try:
+                month_num = int(saved[-1].split(".")[1])
+                total = get_month_total(month_num)
+                from config import MONTH_NAMES
+                month_name = MONTH_NAMES.get(month_num, str(month_num))
+                if total is not None:
+                    summary = f"\n\n📊 Итого за {month_name}: {total:,} RSD".replace(",", " ")
+            except Exception:
+                pass
+        await query.edit_message_text(f"✅ Все транзакции обработаны.{summary}")
         context.user_data.clear()
         return ConversationHandler.END
     context.user_data["tx_idx"] = idx
@@ -75,6 +88,8 @@ async def cb_confirm(update: Update, context) -> int:
             category=tx["suggested_category"],
             comment=tx.get("comment", ""),
         )
+        dates = context.user_data.setdefault("saved_dates", [])
+        dates.append(tx["date"])
         await query.answer(f"✅ {tx['merchant']} добавлен", show_alert=False)
     except Exception as e:
         logger.error("Sheets error: %s", e)

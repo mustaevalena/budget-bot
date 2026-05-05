@@ -128,6 +128,39 @@ def _ensure_month_column(service, month_num: int) -> None:
     ).execute()
 
 
+def get_month_total(month_num: int) -> int | None:
+    """Return total RSD for the given month from summary sheet, or None if not found."""
+    service = _get_service()
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_SUMMARY_SHEET}'!1:1",
+    ).execute()
+    headers = result.get("values", [[]])[0]
+    header = _month_col_header(month_num)
+    if header not in headers:
+        return None
+    col_idx = headers.index(header) + 1  # 1-based
+    col = _col_letter(col_idx)
+
+    # Find ИТОГО row
+    col_a = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_SUMMARY_SHEET}'!A:A",
+    ).execute().get("values", [])
+    itogo_row = next((i + 1 for i, r in enumerate(col_a) if r and "ИТОГО" in r[0].upper()), None)
+    if not itogo_row:
+        return None
+
+    val = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_SUMMARY_SHEET}'!{col}{itogo_row}",
+    ).execute().get("values", [[None]])[0][0]
+    try:
+        return int(float(str(val).replace(",", ".")))
+    except (ValueError, TypeError):
+        return None
+
+
 def get_merchant_categories() -> dict[str, str]:
     """Return {merchant: last_used_category} from transaction history."""
     service = _get_service()
@@ -165,8 +198,8 @@ def append_transaction(date: str, merchant: str, amount: int, category: str, com
         }}]},
     ).execute()
 
-    # Write data into the new row
-    row = [date, merchant, amount, category, comment]
+    # Write data — date as plain text (apostrophe prefix prevents Google Sheets date parsing)
+    row = [f"'{date}", merchant, amount, category, comment]
     service.spreadsheets().values().update(
         spreadsheetId=SPREADSHEET_ID,
         range=f"'{_TRANSACTIONS_SHEET}'!A2:E2",
