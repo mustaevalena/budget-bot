@@ -148,13 +148,29 @@ def get_merchant_categories() -> dict[str, str]:
 def append_transaction(date: str, merchant: str, amount: int, category: str, comment: str = "") -> None:
     service = _get_service()
 
-    # Add row to transactions sheet
-    row = [date, merchant, amount, category, comment]
-    service.spreadsheets().values().append(
+    # Get sheet id to insert row after header (row 2)
+    meta = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+    sheet_id = next(
+        s["properties"]["sheetId"]
+        for s in meta["sheets"]
+        if s["properties"]["title"] == _TRANSACTIONS_SHEET
+    )
+
+    # Insert blank row at position 2 (after header)
+    service.spreadsheets().batchUpdate(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"'{_TRANSACTIONS_SHEET}'!A:E",
+        body={"requests": [{"insertDimension": {
+            "range": {"sheetId": sheet_id, "dimension": "ROWS", "startIndex": 1, "endIndex": 2},
+            "inheritFromBefore": False,
+        }}]},
+    ).execute()
+
+    # Write data into the new row
+    row = [date, merchant, amount, category, comment]
+    service.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_TRANSACTIONS_SHEET}'!A2:E2",
         valueInputOption="USER_ENTERED",
-        insertDataOption="INSERT_ROWS",
         body={"values": [row]},
     ).execute()
 
