@@ -26,16 +26,30 @@ async def _process_images(context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = data["user_id"]
     loading_msg_id = data["msg_id"]
 
+    try:
+        await _do_process_images(context, chat_id, user_id, loading_msg_id, data["images"])
+    except Exception as e:
+        logger.error("_process_images failed: %s", e, exc_info=True)
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=loading_msg_id,
+                text=f"❌ Ошибка обработки: {e}",
+            )
+        except Exception:
+            pass
+
+
+async def _do_process_images(context, chat_id, user_id, loading_msg_id, images) -> None:
     all_txs = []
-    for image_bytes in data["images"]:
+    for image_bytes in images:
         try:
             txs = parse_screenshot(image_bytes)
             all_txs.extend(txs)
         except Exception as e:
             logger.error("Claude error on album image: %s", e)
 
-    # Edit the loading message
-    loading_msg = await context.bot.edit_message_text(
+    await context.bot.edit_message_text(
         chat_id=chat_id,
         message_id=loading_msg_id,
         text=f"🔍 Распознано транзакций: {len(all_txs)}" if all_txs else "❌ Транзакций не найдено.",
