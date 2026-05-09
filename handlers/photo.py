@@ -81,15 +81,21 @@ async def _process_images(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     user_data = context.application.user_data.setdefault(user_id, {})
-    user_data["txs"] = pending
-    user_data["tx_idx"] = 0
-    user_data["auto_saved"] = auto_saved
+    # Append to existing queue in case more album photos arrived while confirming
+    existing = user_data.get("txs", [])
+    user_data["txs"] = existing + pending
+    if "tx_idx" not in user_data:
+        user_data["tx_idx"] = 0
+    user_data.setdefault("auto_saved", []).extend(auto_saved)
 
+    # Show current card with updated total (queue may have grown if more album photos merged in)
+    all_txs = user_data["txs"]
+    current_idx = user_data["tx_idx"]
     await context.bot.edit_message_text(
         chat_id=chat_id,
         message_id=loading_msg_id,
-        text=format_card(pending[0], idx=0, total=len(pending)),
-        reply_markup=confirm_keyboard(idx=0),
+        text=format_card(all_txs[current_idx], idx=current_idx, total=len(all_txs)),
+        reply_markup=confirm_keyboard(idx=current_idx),
         parse_mode="HTML",
     )
 

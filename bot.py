@@ -187,6 +187,8 @@ def main() -> None:
         ],
         states={
             CONFIRMING: [
+                # Allow additional album photos to arrive while confirming
+                MessageHandler(filters.PHOTO, handle_photo),
                 CallbackQueryHandler(cb_confirm, pattern=r"^confirm:"),
                 CallbackQueryHandler(cb_skip, pattern=r"^skip:"),
                 CallbackQueryHandler(cb_cancel, pattern=r"^cancel$"),
