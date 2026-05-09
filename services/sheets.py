@@ -25,6 +25,32 @@ def _get_service():
     return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
 
+def _parse_ddmm(date_str: str) -> tuple[int, int]:
+    """Parse DD.MM into (month, day) for newest-first comparison."""
+    parts = date_str.lstrip("'").strip().split(".")
+    return (int(parts[1]), int(parts[0]))  # (month, day)
+
+
+def _find_insert_row(service, new_date: str) -> int:
+    """Return 1-based row number where new_date transaction should be inserted (newest first)."""
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_TRANSACTIONS_SHEET}'!A:A",
+        valueRenderOption="UNFORMATTED_VALUE",
+    ).execute()
+    rows = result.get("values", [])
+    new_key = _parse_ddmm(new_date)
+    for i, row in enumerate(rows[1:], start=2):  # skip header (row 1)
+        if not row or not row[0]:
+            return i  # first empty row
+        try:
+            if _parse_ddmm(str(row[0])) < new_key:
+                return i  # existing date is older → insert before it
+        except (ValueError, IndexError):
+            continue
+    return len(rows) + 1  # all existing dates are newer → append at bottom
+
+
 def _col_letter(n: int) -> str:
     """1-based column index → letter(s): 1→A, 26→Z, 27→AA"""
     result = ""
@@ -243,11 +269,18 @@ def append_transaction(date: str, merchant: str, amount: int, category: str, com
         if s["properties"]["title"] == _TRANSACTIONS_SHEET
     )
 
-    # Insert blank row at position 2 (after header)
+    # Find insertion position to maintain newest-first sort order
+    insert_row = _find_insert_row(service, date)
+
     service.spreadsheets().batchUpdate(
         spreadsheetId=SPREADSHEET_ID,
         body={"requests": [{"insertDimension": {
-            "range": {"sheetId": sheet_id, "dimension": "ROWS", "startIndex": 1, "endIndex": 2},
+            "range": {
+                "sheetId": sheet_id,
+                "dimension": "ROWS",
+                "startIndex": insert_row - 1,
+                "endIndex": insert_row,
+            },
             "inheritFromBefore": False,
         }}]},
     ).execute()
@@ -256,7 +289,7 @@ def append_transaction(date: str, merchant: str, amount: int, category: str, com
     row = [f"'{date}", merchant, amount, category, comment]
     service.spreadsheets().values().update(
         spreadsheetId=SPREADSHEET_ID,
-        range=f"'{_TRANSACTIONS_SHEET}'!A2:E2",
+        range=f"'{_TRANSACTIONS_SHEET}'!A{insert_row}:E{insert_row}",
         valueInputOption="USER_ENTERED",
         body={"values": [row]},
     ).execute()
