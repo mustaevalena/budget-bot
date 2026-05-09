@@ -94,13 +94,16 @@ async def _do_process_images(context, chat_id, user_id, loading_msg_id, images) 
             await context.bot.delete_message(chat_id=chat_id, message_id=loading_msg_id)
         return
 
-    user_data = context.application.user_data.setdefault(user_id, {})
-    # Append to existing queue in case more album photos arrived while confirming
+    # application.user_data is a mappingproxy — can't add new keys, but can modify existing dict.
+    # handle_photo always touches context.user_data first, so user_id key is guaranteed to exist.
+    user_data = context.application.user_data[user_id]
     existing = user_data.get("txs", [])
     user_data["txs"] = existing + pending
     if "tx_idx" not in user_data:
         user_data["tx_idx"] = 0
-    user_data.setdefault("auto_saved", []).extend(auto_saved)
+    if "auto_saved" not in user_data:
+        user_data["auto_saved"] = []
+    user_data["auto_saved"].extend(auto_saved)
 
     # Show current card with updated total (queue may have grown if more album photos merged in)
     all_txs = user_data["txs"]
@@ -137,6 +140,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         else:
             # Subsequent photo — just add to buffer
             context.bot_data[group_key]["images"].append(image_bytes)
+
+        # Touch context.user_data so application.user_data[user_id] exists when job fires
+        context.user_data.setdefault("_ready", True)
 
         # Cancel existing job and reschedule (wait for more photos)
         current_jobs = context.job_queue.get_jobs_by_name(group_key)
