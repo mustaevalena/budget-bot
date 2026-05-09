@@ -50,16 +50,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         else:
             pending.append(tx)
 
-    if auto_saved:
-        lines = "\n".join(f"• {t['merchant']} {t['amount']} RSD → {t['suggested_category']}" for t in auto_saved)
-        await update.message.reply_text(f"✅ Автоматически записано:\n{lines}")
-
     if not pending:
-        await msg.delete()
+        # Nothing to confirm — show report immediately
+        if auto_saved:
+            lines = "\n".join(f"• {t['merchant']} {t['amount']} RSD → {t['suggested_category']}" for t in auto_saved)
+            await msg.edit_text(f"✅ Записано ({len(auto_saved)}):\n{lines}")
+        else:
+            await msg.delete()
         return -1
 
     context.user_data["txs"] = pending
     context.user_data["tx_idx"] = 0
+    context.user_data["auto_saved"] = auto_saved
     total = len(pending)
 
     await msg.edit_text(

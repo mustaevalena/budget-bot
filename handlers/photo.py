@@ -69,19 +69,21 @@ async def _process_images(context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             pending.append(tx)
 
-    if auto_saved:
-        lines = "\n".join(f"• {t['merchant']} {t['amount']} RSD → {t['suggested_category']}" for t in auto_saved)
-        await context.bot.send_message(chat_id=chat_id, text=f"✅ Автоматически записано:\n{lines}")
-
     if not pending:
-        await context.bot.delete_message(chat_id=chat_id, message_id=loading_msg_id)
+        if auto_saved:
+            lines = "\n".join(f"• {t['merchant']} {t['amount']} RSD → {t['suggested_category']}" for t in auto_saved)
+            await context.bot.edit_message_text(
+                chat_id=chat_id, message_id=loading_msg_id,
+                text=f"✅ Записано ({len(auto_saved)}):\n{lines}",
+            )
+        else:
+            await context.bot.delete_message(chat_id=chat_id, message_id=loading_msg_id)
         return
 
-    # Store pending txs in user_data — keyed by user_id since this runs outside a handler
-    # We use bot_data with user key to avoid collision
     user_data = context.application.user_data.setdefault(user_id, {})
     user_data["txs"] = pending
     user_data["tx_idx"] = 0
+    user_data["auto_saved"] = auto_saved
 
     await context.bot.edit_message_text(
         chat_id=chat_id,
@@ -163,16 +165,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         else:
             pending.append(tx)
 
-    if auto_saved:
-        lines = "\n".join(f"• {t['merchant']} {t['amount']} RSD → {t['suggested_category']}" for t in auto_saved)
-        await update.message.reply_text(f"✅ Автоматически записано:\n{lines}")
-
     if not pending:
-        await msg.delete()
+        # Nothing to confirm — show report immediately
+        if auto_saved:
+            lines = "\n".join(f"• {t['merchant']} {t['amount']} RSD → {t['suggested_category']}" for t in auto_saved)
+            await msg.edit_text(f"✅ Записано ({len(auto_saved)}):\n{lines}")
+        else:
+            await msg.delete()
         return -1
 
     context.user_data["txs"] = pending
     context.user_data["tx_idx"] = 0
+    context.user_data["auto_saved"] = auto_saved
 
     await msg.edit_text(
         format_card(pending[0], idx=0, total=len(pending)),

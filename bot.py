@@ -58,7 +58,19 @@ async def _show_next(query, context, idx: int) -> int:
     """Show next transaction or finish."""
     txs = context.user_data.get("txs", [])
     if idx >= len(txs):
-        # Check summary totals for the current month
+        # Build full report: auto-saved + manually confirmed
+        auto_saved = context.user_data.get("auto_saved", [])
+        confirmed = context.user_data.get("confirmed", [])
+        all_saved = auto_saved + confirmed
+        report = ""
+        if all_saved:
+            lines = "\n".join(
+                f"• {t['merchant']} {t['amount']} RSD → {t['suggested_category']}"
+                for t in all_saved
+            )
+            report = f"Записано ({len(all_saved)}):\n{lines}"
+
+        # Monthly total
         saved = context.user_data.get("saved_dates", [])
         summary = ""
         if saved:
@@ -71,7 +83,12 @@ async def _show_next(query, context, idx: int) -> int:
                     summary = f"\n\n📊 Итого за {month_name}: {total:,} RSD".replace(",", " ")
             except Exception:
                 pass
-        await query.edit_message_text(f"✅ Все транзакции обработаны.{summary}")
+
+        text = f"✅ Все транзакции обработаны."
+        if report:
+            text += f"\n\n{report}"
+        text += summary
+        await query.edit_message_text(text)
         context.user_data.clear()
         return ConversationHandler.END
     context.user_data["tx_idx"] = idx
@@ -100,6 +117,7 @@ async def cb_confirm(update: Update, context) -> int:
         )
         dates = context.user_data.setdefault("saved_dates", [])
         dates.append(tx["date"])
+        context.user_data.setdefault("confirmed", []).append(tx)
         await query.answer(f"✅ {tx['merchant']} добавлен", show_alert=False)
     except Exception as e:
         logger.error("Sheets error: %s", e)
