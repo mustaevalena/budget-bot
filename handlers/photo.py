@@ -85,7 +85,7 @@ async def _do_process_images(context, chat_id, user_id, loading_msg_id, images) 
 
     if not pending:
         if auto_saved:
-            lines = "\n".join(f"• {t['merchant']} {t['amount']} RSD → {t['suggested_category']}" for t in auto_saved)
+            lines = "\n".join(f"• {t['date']} {t['merchant']} {t['amount']} RSD → {t['suggested_category']}" for t in auto_saved)
             await context.bot.edit_message_text(
                 chat_id=chat_id, message_id=loading_msg_id,
                 text=f"✅ Записано ({len(auto_saved)}):\n{lines}",
@@ -194,7 +194,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if not pending:
         # Nothing to confirm — show report immediately
         if auto_saved:
-            lines = "\n".join(f"• {t['merchant']} {t['amount']} RSD → {t['suggested_category']}" for t in auto_saved)
+            lines = "\n".join(f"• {t['date']} {t['merchant']} {t['amount']} RSD → {t['suggested_category']}" for t in auto_saved)
             await msg.edit_text(f"✅ Записано ({len(auto_saved)}):\n{lines}")
         else:
             await msg.delete()

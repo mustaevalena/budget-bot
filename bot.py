@@ -65,7 +65,7 @@ async def _show_next(query, context, idx: int) -> int:
         report = ""
         if all_saved:
             lines = "\n".join(
-                f"• {t['merchant']} {t['amount']} RSD → {t['suggested_category']}"
+                f"• {t['date']} {t['merchant']} {t['amount']} RSD → {t['suggested_category']}"
                 for t in all_saved
             )
             report = f"Записано ({len(all_saved)}):\n{lines}"
