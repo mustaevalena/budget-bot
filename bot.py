@@ -14,7 +14,7 @@ from config import TELEGRAM_TOKEN, CONFIRMING, CHOOSING_CATEGORY
 from handlers.photo import handle_photo
 from handlers.text import handle_text
 from keyboards import category_keyboard, confirm_keyboard, format_card
-from services.sheets import append_transaction, get_month_total, repair_summary_formulas
+from services.sheets import add_merchant_rule, append_transaction, get_month_total, repair_summary_formulas
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -95,16 +95,16 @@ async def _show_next(query, context, idx: int) -> int:
     tx = txs[idx]
     await query.edit_message_text(
         format_card(tx, idx=idx, total=len(txs)),
-        reply_markup=confirm_keyboard(idx=idx),
+        reply_markup=confirm_keyboard(idx=idx, merge_candidate=tx.get("merge_candidate")),
         parse_mode="HTML",
     )
     return CONFIRMING
 
 
-async def cb_confirm(update: Update, context) -> int:
-    query = update.callback_query
-    await query.answer()
-    idx = int(query.data.split(":")[1])
+async def _confirm_and_advance(query, context, idx: int) -> int:
+    """Save the transaction at idx and move to the next one. Shared by the plain
+    confirm button and the merge_yes/merge_once flow (which pre-set the category
+    before calling this)."""
     txs = context.user_data.get("txs", [])
     tx = txs[idx]
     try:
@@ -123,6 +123,44 @@ async def cb_confirm(update: Update, context) -> int:
         logger.error("Sheets error: %s", e)
         await query.answer("❌ Ошибка записи", show_alert=True)
     return await _show_next(query, context, idx + 1)
+
+
+async def cb_confirm(update: Update, context) -> int:
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    return await _confirm_and_advance(query, context, idx)
+
+
+async def cb_merge_yes(update: Update, context) -> int:
+    """User confirmed a new merchant is the same chain as a known one — save the
+    rule so future store-id variants of it auto-categorize without asking."""
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    txs = context.user_data.get("txs", [])
+    tx = txs[idx]
+    mc = tx.pop("merge_candidate", None)
+    if mc:
+        tx["suggested_category"] = mc["category"]
+        try:
+            add_merchant_rule(mc["canonical_key"], mc["category"], tx["merchant"])
+        except Exception as e:
+            logger.error("add_merchant_rule error: %s", e)
+    return await _confirm_and_advance(query, context, idx)
+
+
+async def cb_merge_once(update: Update, context) -> int:
+    """User accepted the suggested category for just this transaction, without
+    turning it into a standing rule."""
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    txs = context.user_data.get("txs", [])
+    mc = txs[idx].pop("merge_candidate", None)
+    if mc:
+        txs[idx]["suggested_category"] = mc["category"]
+    return await _confirm_and_advance(query, context, idx)
 
 
 async def cb_skip(update: Update, context) -> int:
@@ -155,6 +193,7 @@ async def cb_choose_category(update: Update, context) -> int:
     idx = int(idx_str)
     txs = context.user_data.get("txs", [])
     txs[idx]["suggested_category"] = category
+    txs[idx].pop("merge_candidate", None)  # manual choice overrides any merge suggestion
     context.user_data["txs"] = txs
     await query.edit_message_text(
         format_card(txs[idx], idx=idx, total=len(txs)),
@@ -171,7 +210,7 @@ async def cb_back(update: Update, context) -> int:
     txs = context.user_data.get("txs", [])
     await query.edit_message_text(
         format_card(txs[idx], idx=idx, total=len(txs)),
-        reply_markup=confirm_keyboard(idx=idx),
+        reply_markup=confirm_keyboard(idx=idx, merge_candidate=txs[idx].get("merge_candidate")),
         parse_mode="HTML",
     )
     return CONFIRMING
@@ -190,6 +229,8 @@ def main() -> None:
                 # Allow additional album photos to arrive while confirming
                 MessageHandler(filters.PHOTO, handle_photo),
                 CallbackQueryHandler(cb_confirm, pattern=r"^confirm:"),
+                CallbackQueryHandler(cb_merge_yes, pattern=r"^merge_yes:"),
+                CallbackQueryHandler(cb_merge_once, pattern=r"^merge_once:"),
                 CallbackQueryHandler(cb_skip, pattern=r"^skip:"),
                 CallbackQueryHandler(cb_cancel, pattern=r"^cancel$"),
                 CallbackQueryHandler(cb_edit_category, pattern=r"^edit_category:"),

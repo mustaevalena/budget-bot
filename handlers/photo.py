@@ -5,8 +5,8 @@ from telegram.ext import ContextTypes
 
 from config import CONFIRMING
 from keyboards import confirm_keyboard, format_card
+from services.categorize import classify_transactions
 from services.claude import parse_screenshot
-from services.sheets import append_transaction, get_merchant_categories
 
 logger = logging.getLogger(__name__)
 
@@ -58,30 +58,7 @@ async def _do_process_images(context, chat_id, user_id, loading_msg_id, images) 
     if not all_txs:
         return
 
-    try:
-        known = get_merchant_categories()
-    except Exception:
-        known = {}
-
-    auto_saved = []
-    pending = []
-    for tx in all_txs:
-        key = tx["merchant"].strip().lower()
-        if key in known:
-            tx["suggested_category"] = known[key]
-            try:
-                append_transaction(
-                    date=tx["date"],
-                    merchant=tx["merchant"],
-                    amount=tx["amount"],
-                    category=tx["suggested_category"],
-                )
-                auto_saved.append(tx)
-            except Exception as e:
-                logger.error("Auto-save error: %s", e)
-                pending.append(tx)
-        else:
-            pending.append(tx)
+    auto_saved, pending = classify_transactions(all_txs)
 
     if not pending:
         if auto_saved:
@@ -108,11 +85,12 @@ async def _do_process_images(context, chat_id, user_id, loading_msg_id, images) 
     # Show current card with updated total (queue may have grown if more album photos merged in)
     all_txs = user_data["txs"]
     current_idx = user_data["tx_idx"]
+    current_tx = all_txs[current_idx]
     await context.bot.edit_message_text(
         chat_id=chat_id,
         message_id=loading_msg_id,
-        text=format_card(all_txs[current_idx], idx=current_idx, total=len(all_txs)),
-        reply_markup=confirm_keyboard(idx=current_idx),
+        text=format_card(current_tx, idx=current_idx, total=len(all_txs)),
+        reply_markup=confirm_keyboard(idx=current_idx, merge_candidate=current_tx.get("merge_candidate")),
         parse_mode="HTML",
     )
 
@@ -166,30 +144,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await msg.edit_text("❌ Транзакций не найдено на скрине.")
         return -1
 
-    try:
-        known = get_merchant_categories()
-    except Exception:
-        known = {}
-
-    auto_saved = []
-    pending = []
-    for tx in txs:
-        key = tx["merchant"].strip().lower()
-        if key in known:
-            tx["suggested_category"] = known[key]
-            try:
-                append_transaction(
-                    date=tx["date"],
-                    merchant=tx["merchant"],
-                    amount=tx["amount"],
-                    category=tx["suggested_category"],
-                )
-                auto_saved.append(tx)
-            except Exception as e:
-                logger.error("Auto-save error: %s", e)
-                pending.append(tx)
-        else:
-            pending.append(tx)
+    auto_saved, pending = classify_transactions(txs)
 
     if not pending:
         # Nothing to confirm — show report immediately
@@ -206,7 +161,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     await msg.edit_text(
         format_card(pending[0], idx=0, total=len(pending)),
-        reply_markup=confirm_keyboard(idx=0),
+        reply_markup=confirm_keyboard(idx=0, merge_candidate=pending[0].get("merge_candidate")),
         parse_mode="HTML",
     )
     return CONFIRMING

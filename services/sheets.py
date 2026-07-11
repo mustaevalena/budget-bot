@@ -3,12 +3,14 @@ import os
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from config import MONTH_NAMES, SPREADSHEET_ID
 
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 _TRANSACTIONS_SHEET = "транзакции 2026"
 _SUMMARY_SHEET = "суммы по месяцам"
+_RULES_SHEET = "правила мерчантов"
 
 
 def _get_service():
@@ -239,6 +241,73 @@ def get_month_total(month_num: int) -> int | None:
         return int(float(val))
     except (ValueError, TypeError):
         return None
+
+
+def _ensure_rules_sheet(service) -> None:
+    """Create the merchant-rules sheet with a header row if it doesn't exist yet."""
+    meta = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+    if any(s["properties"]["title"] == _RULES_SHEET for s in meta["sheets"]):
+        return
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=SPREADSHEET_ID,
+        body={"requests": [{"addSheet": {"properties": {"title": _RULES_SHEET}}}]},
+    ).execute()
+    service.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_RULES_SHEET}'!A1:C1",
+        valueInputOption="USER_ENTERED",
+        body={"values": [["canonical_key", "category", "merchants"]]},
+    ).execute()
+
+
+def get_merchant_rules() -> dict[str, str]:
+    """Return {canonical_key: category} from confirmed merchant-grouping rules
+    (e.g. "maxi" -> "гипермаркет+аптека"), used to auto-categorize new store-id
+    variants of an already-confirmed chain without asking again."""
+    service = _get_service()
+    try:
+        result = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"'{_RULES_SHEET}'!A:B",
+        ).execute()
+    except HttpError:
+        return {}  # sheet doesn't exist yet — no rules confirmed so far
+    rows = result.get("values", [])
+    return {row[0].strip().lower(): row[1] for row in rows[1:] if len(row) >= 2 and row[0]}
+
+
+def add_merchant_rule(canonical_key: str, category: str, example_merchant: str) -> None:
+    """Persist a user-confirmed merchant-grouping rule, or add another example
+    merchant to an existing one."""
+    service = _get_service()
+    _ensure_rules_sheet(service)
+
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_RULES_SHEET}'!A:C",
+    ).execute()
+    rows = result.get("values", [])
+
+    for i, row in enumerate(rows[1:], start=2):
+        if row and row[0].strip().lower() == canonical_key:
+            merchants = row[2].split(", ") if len(row) >= 3 and row[2] else []
+            if example_merchant not in merchants:
+                merchants.append(example_merchant)
+            service.spreadsheets().values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"'{_RULES_SHEET}'!B{i}:C{i}",
+                valueInputOption="USER_ENTERED",
+                body={"values": [[category, ", ".join(merchants)]]},
+            ).execute()
+            return
+
+    service.spreadsheets().values().append(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"'{_RULES_SHEET}'!A:C",
+        valueInputOption="USER_ENTERED",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [[canonical_key, category, example_merchant]]},
+    ).execute()
 
 
 def get_merchant_categories() -> dict[str, str]:

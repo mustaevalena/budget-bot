@@ -5,8 +5,8 @@ from telegram.ext import ContextTypes
 
 from config import CONFIRMING
 from keyboards import confirm_keyboard, format_card
+from services.categorize import classify_transactions
 from services.claude import parse_text
-from services.sheets import append_transaction, get_merchant_categories
 
 logger = logging.getLogger(__name__)
 
@@ -25,30 +25,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await msg.edit_text("❌ Не удалось разобрать расход. Попробуй в формате: «Кофе 500» или «Wolt 1200 RSD»")
         return -1
 
-    try:
-        known = get_merchant_categories()
-    except Exception:
-        known = {}
-
-    auto_saved = []
-    pending = []
-    for tx in txs:
-        key = tx["merchant"].strip().lower()
-        if key in known:
-            tx["suggested_category"] = known[key]
-            try:
-                append_transaction(
-                    date=tx["date"],
-                    merchant=tx["merchant"],
-                    amount=tx["amount"],
-                    category=tx["suggested_category"],
-                )
-                auto_saved.append(tx)
-            except Exception as e:
-                logger.error("Auto-save error: %s", e)
-                pending.append(tx)
-        else:
-            pending.append(tx)
+    auto_saved, pending = classify_transactions(txs)
 
     if not pending:
         # Nothing to confirm — show report immediately
@@ -66,7 +43,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     await msg.edit_text(
         format_card(pending[0], idx=0, total=total),
-        reply_markup=confirm_keyboard(idx=0),
+        reply_markup=confirm_keyboard(idx=0, merge_candidate=pending[0].get("merge_candidate")),
         parse_mode="HTML",
     )
     return CONFIRMING
