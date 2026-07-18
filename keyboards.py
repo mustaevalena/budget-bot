@@ -27,10 +27,11 @@ def category_keyboard(idx: int = 0) -> InlineKeyboardMarkup:
 
 def format_card(tx: dict, idx: int = 0, total: int = 1) -> str:
     counter = f" ({idx + 1}/{total})" if total > 1 else ""
-    card = (
-        f"📅 <b>{tx['date']}</b>  |  {tx['merchant']}  |  <b>{tx['amount']:,} RSD</b>{counter}\n"
-        f"🏷 {tx['suggested_category']}"
-    ).replace(",", " ")
+    parts = [f"📅 <b>{tx['date']}</b>"]
+    if tx.get("merchant"):
+        parts.append(tx["merchant"])
+    parts.append(f"<b>{tx['amount']:,} RSD</b>{counter}")
+    card = ("  |  ".join(parts) + f"\n🏷 {tx['suggested_category']}").replace(",", " ")
     mc = tx.get("merge_candidate")
     if mc:
         card += f"\n🔗 Похоже на «{mc['example']}» ({mc['category']}) — тот же мерчант?"

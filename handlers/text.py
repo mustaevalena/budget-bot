@@ -1,20 +1,47 @@
 import logging
+import re
+from datetime import datetime
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import CONFIRMING
-from keyboards import confirm_keyboard, format_card
+from config import CATEGORIES, CHOOSING_CATEGORY, CONFIRMING
+from keyboards import category_keyboard, confirm_keyboard, format_card
 from services.categorize import classify_transactions
 from services.claude import parse_text
 
 logger = logging.getLogger(__name__)
+
+# A message that's just a number, e.g. "500" or "1200.50" — no merchant to parse,
+# skip Claude and go straight to category selection.
+_AMOUNT_RE = re.compile(r"^\d+([.,]\d+)?$")
+
+
+async def _handle_bare_amount(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> int:
+    tx = {
+        "date": datetime.now().strftime("%d.%m"),
+        "merchant": "",
+        "amount": round(float(text.replace(",", "."))),
+        "suggested_category": CATEGORIES[0],
+    }
+    context.user_data["txs"] = [tx]
+    context.user_data["tx_idx"] = 0
+    context.user_data["auto_saved"] = []
+    await update.message.reply_text(
+        format_card(tx, idx=0, total=1),
+        reply_markup=category_keyboard(idx=0),
+        parse_mode="HTML",
+    )
+    return CHOOSING_CATEGORY
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
     if text.startswith("/"):
         return -1
+
+    if _AMOUNT_RE.match(text):
+        return await _handle_bare_amount(update, context, text)
 
     msg = await update.message.reply_text("🔍 Разбираю расход...")
 
