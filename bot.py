@@ -187,6 +187,8 @@ async def cb_edit_category(update: Update, context) -> int:
 
 
 async def cb_choose_category(update: Update, context) -> int:
+    """Picking a category from the full list is itself a confirmation — save
+    right away instead of asking the user to also tap "Добавить"."""
     query = update.callback_query
     await query.answer()
     _, idx_str, category = query.data.split(":", 2)
@@ -195,12 +197,7 @@ async def cb_choose_category(update: Update, context) -> int:
     txs[idx]["suggested_category"] = category
     txs[idx].pop("merge_candidate", None)  # manual choice overrides any merge suggestion
     context.user_data["txs"] = txs
-    await query.edit_message_text(
-        format_card(txs[idx], idx=idx, total=len(txs)),
-        reply_markup=confirm_keyboard(idx=idx),
-        parse_mode="HTML",
-    )
-    return CONFIRMING
+    return await _confirm_and_advance(query, context, idx)
 
 
 async def cb_back(update: Update, context) -> int:
