@@ -1,4 +1,5 @@
 import logging
+import time
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -12,6 +13,37 @@ logger = logging.getLogger(__name__)
 
 # bot_data key: "album:{media_group_id}" → {"chat_id", "user_id", "images": [...bytes], "msg_id"}
 _ALBUM_DELAY = 2.0  # seconds to wait for all album photos to arrive
+
+# A new photo is allowed to merge into an in-progress review (so late album
+# photos and follow-up screenshots join the same queue), but only while that
+# review is still active. Past this, an unfinished queue is an abandoned
+# session, not a continuation — merging into it would silently glue an old,
+# forgotten transaction onto an unrelated new batch.
+_STALE_QUEUE_SECONDS = 15 * 60
+
+
+async def _merge_pending(context, chat_id: int, user_data: dict, auto_saved: list[dict], pending: list[dict]) -> None:
+    """Add newly-parsed transactions to user_data["txs"], joining any
+    still-active review in progress. Drops a stale, abandoned queue instead of
+    merging into it (with a heads-up message), so old forgotten transactions
+    don't reappear glued onto an unrelated new batch."""
+    existing = user_data.get("txs", [])
+    if existing and time.time() - user_data.get("last_activity", 0) > _STALE_QUEUE_SECONDS:
+        logger.info("Dropping %d stale unconfirmed transaction(s) from an abandoned session", len(existing))
+        dropped = "\n".join(f"• {t['date']} {t['merchant']} {t['amount']} RSD" for t in existing)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"⌛ Отменил незавершённую сессию (давно не подтверждали):\n{dropped}\nЕсли нужны — пришли ещё раз.",
+        )
+        existing = []
+        user_data["tx_idx"] = 0
+        user_data["auto_saved"] = []
+
+    user_data["txs"] = existing + pending
+    user_data.setdefault("tx_idx", 0)
+    user_data.setdefault("auto_saved", [])
+    user_data["auto_saved"].extend(auto_saved)
+    user_data["last_activity"] = time.time()
 
 
 async def _process_images(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -74,13 +106,7 @@ async def _do_process_images(context, chat_id, user_id, loading_msg_id, images) 
     # application.user_data is a mappingproxy — can't add new keys, but can modify existing dict.
     # handle_photo always touches context.user_data first, so user_id key is guaranteed to exist.
     user_data = context.application.user_data[user_id]
-    existing = user_data.get("txs", [])
-    user_data["txs"] = existing + pending
-    if "tx_idx" not in user_data:
-        user_data["tx_idx"] = 0
-    if "auto_saved" not in user_data:
-        user_data["auto_saved"] = []
-    user_data["auto_saved"].extend(auto_saved)
+    await _merge_pending(context, chat_id, user_data, auto_saved, pending)
 
     # Show current card with updated total (queue may have grown if more album photos merged in)
     all_txs = user_data["txs"]
@@ -155,13 +181,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             await msg.delete()
         return -1
 
-    context.user_data["txs"] = pending
-    context.user_data["tx_idx"] = 0
-    context.user_data["auto_saved"] = auto_saved
+    await _merge_pending(context, update.effective_chat.id, context.user_data, auto_saved, pending)
 
+    all_txs = context.user_data["txs"]
+    current_idx = context.user_data["tx_idx"]
+    current_tx = all_txs[current_idx]
     await msg.edit_text(
-        format_card(pending[0], idx=0, total=len(pending)),
-        reply_markup=confirm_keyboard(idx=0, merge_candidate=pending[0].get("merge_candidate")),
+        format_card(current_tx, idx=current_idx, total=len(all_txs)),
+        reply_markup=confirm_keyboard(idx=current_idx, merge_candidate=current_tx.get("merge_candidate")),
         parse_mode="HTML",
     )
     return CONFIRMING
